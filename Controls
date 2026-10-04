@@ -1,0 +1,917 @@
+<html>
+<head>
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+    }
+
+    button {
+      background-color: #4CAF50;
+      border: none;
+      color: white;
+      padding: 15px 24px;
+      text-align: center;
+      text-decoration: none;
+      display: inline-block;
+      font-size: 16px;
+    }
+
+    .buttonsDiv {
+      outline: 1px solid gold;
+      height: 100px;
+    }
+
+    #left {
+      padding: 0;
+      margin: 0;
+      float: left;
+      width: 50%;
+    }
+
+    #right {
+      padding: 0;
+      margin: 0;
+      float: right;
+      width: 50%;
+    }
+
+    #joystick {
+      margin: 0 auto;
+      position: relative;
+      width: 256px;
+    }
+  </style>
+
+  <script>
+    var characteristic;
+
+    function connect() {
+      navigator.bluetooth.requestDevice({
+        filters: [{"name":"w32 ControlHub"}],
+        optionalServices: [
+          'd9d9e9e0-aa4e-4797-8151-cb41cedaf2ad'
+        ]
+      })
+      .then(device => {
+        return device.gatt.connect();
+      })
+      .then(server => {
+        return server.getPrimaryService(
+          'd9d9e9e0-aa4e-4797-8151-cb41cedaf2ad'
+        );
+      })
+      .then(async service => {
+        characteristic = await service.getCharacteristic(
+          "d9d9e9e1-aa4e-4797-8151-cb41cedaf2ad"
+        );
+      })
+      .then(() => {
+        console.log('Connected!');
+        stop();
+      });
+    }
+
+    async function writeToChar(value) {
+      if (!characteristic) return;
+
+      value = hexToBytes(value);
+      value = new Uint8Array(value).buffer;
+
+      try {
+        await characteristic.writeValue(value);
+      } catch(e) {
+        console.log("Bluetooth write error:", e);
+      }
+    }
+
+    async function play(sound) {
+      try {
+        await writeToChar(sound);
+      } catch(error) {
+        console.log('Argh! ' + error);
+      }
+    }
+
+    async function drive(index) {
+      try {
+        await writeToChar(driveValues[index]);
+      } catch(error) {
+        console.log('Argh! ' + error);
+      }
+    }
+
+    async function turn(index) {
+      try {
+        await writeToChar(turnValues[index]);
+      } catch(error) {
+        console.log('Argh! ' + error);
+      }
+    }
+
+    async function stop() {
+      try {
+        x = 16;
+        y = 31;
+
+        driveAndTurn();
+      } catch(error) {
+        console.log('Argh! ' + error);
+      }
+    }
+
+    function hexToBytes(hex) {
+      for (
+        var bytes = [],
+        c = 0;
+        c < hex.length;
+        c += 2
+      )
+        bytes.push(
+          parseInt(hex.substr(c, 2), 16)
+        );
+
+      return bytes;
+    }
+
+
+    /* =========================
+       DRIVE COMMANDS
+       ========================= */
+
+    let driveValues = [
+      "140202FF659D", // full forward
+      "140202FA3538",
+      "140202F6F4B4",
+      "140202F2B430",
+      "140202ED57EE",
+      "140202EA2709",
+      "140202E6E685",
+      "140202E3B620",
+      "140202DF41FF",
+      "140202DA115A",
+      "140202D6D0D6",
+      "140202D29052",
+      "140202CE43EF",
+      "140202CA036B",
+      "140202C5F284",
+      "140202C28263",
+      "140202BE3D78",
+      "140202BA7DFC",
+      "140202B6BC70",
+      "140202B2FCF4",
+      "140202AB7FEC",
+      "140202AA6FCD",
+      "140202A6AE41",
+      "140202A2EEC5",
+      "140202A1DEA6",
+      "1402029E191A",
+      "1402029969FD",
+      "140202969812",
+      "14020292D896",
+      "1402028D3B48",
+      "1402028A4BAF",
+      "140202897BCC", // stop
+      "1402027DD457",
+      "1402027994D3",
+      "14020276653C",
+      "1402027225B8",
+      "1402026EF605",
+      "1402026DC666",
+      "1402026896C3",
+      "1402026327A8",
+      "1402026107EA",
+      "1402025CE014",
+      "14020259B0B1",
+      "14020255713D",
+      "140202502198",
+      "1402024B82C2",
+      "14020249A280",
+      "14020245630C",
+      "140202412388",
+      "1402023BFC55",
+      "14020239DC17",
+      "140202337D5D",
+      "140202304D3E",
+      "1402022BEE64",
+      "14020229CE26",
+      "140202214F2E",
+      "140202205F0F",
+      "1402021BD837",
+      "14020218E854",
+      "1402021429D8",
+      "1402020F8A82",
+      "1402020CBAE1",
+      "140202070B8A" // full reverse
+    ];
+
+
+    /* =========================
+       JOYSTICK
+       ========================= */
+
+    class JoystickController {
+
+      constructor(stickID, maxDistance, deadzone) {
+
+        this.id = stickID;
+
+        let stick = document.getElementById(stickID);
+
+        this.dragStart = null;
+        this.touchId = null;
+        this.active = false;
+
+        this.value = {
+          x: 0,
+          y: 0
+        };
+
+        let self = this;
+
+
+        function handleDown(event) {
+
+          self.active = true;
+
+          stick.style.transition = '0s';
+
+          event.preventDefault();
+
+          if (event.changedTouches) {
+
+            self.dragStart = {
+              x: event.changedTouches[0].clientX,
+              y: event.changedTouches[0].clientY
+            };
+
+          } else {
+
+            self.dragStart = {
+              x: event.clientX,
+              y: event.clientY
+            };
+          }
+
+          if (event.changedTouches) {
+            self.touchId =
+              event.changedTouches[0].identifier;
+          }
+        }
+
+
+        function handleMove(event) {
+
+          if (!self.active) return;
+
+          if (!characteristic) return;
+
+
+          /* Touch handling */
+
+          if (event.changedTouches) {
+
+            let found = false;
+
+            for (
+              let i = 0;
+              i < event.changedTouches.length;
+              i++
+            ) {
+
+              if (
+                self.touchId ===
+                event.changedTouches[i].identifier
+              ) {
+
+                event.clientX =
+                  event.changedTouches[i].clientX;
+
+                event.clientY =
+                  event.changedTouches[i].clientY;
+
+                found = true;
+
+                break;
+              }
+            }
+
+            if (!found) return;
+          }
+
+
+          /* Calculate movement */
+
+          const xDiff =
+            event.clientX -
+            self.dragStart.x;
+
+          const yDiff =
+            event.clientY -
+            self.dragStart.y;
+
+
+          const angle =
+            Math.atan2(yDiff, xDiff);
+
+
+          const distance =
+            Math.min(
+              maxDistance,
+              Math.hypot(xDiff, yDiff)
+            );
+
+
+          const xPosition =
+            distance * Math.cos(angle);
+
+          const yPosition =
+            distance * Math.sin(angle);
+
+
+          /* Move joystick graphic */
+
+          stick.style.transform =
+            `translate3d(
+              ${xPosition}px,
+              ${yPosition}px,
+              0px
+            )`;
+
+
+          /* Deadzone */
+
+          const distance2 =
+            (distance < deadzone)
+              ? 0
+              : maxDistance /
+                (maxDistance - deadzone) *
+                (distance - deadzone);
+
+
+          const xPosition2 =
+            distance2 * Math.cos(angle);
+
+          const yPosition2 =
+            distance2 * Math.sin(angle);
+
+
+          const xPercent =
+            parseFloat(
+              (xPosition2 / maxDistance)
+              .toFixed(4)
+            );
+
+
+          const yPercent =
+            parseFloat(
+              (yPosition2 / maxDistance)
+              .toFixed(4)
+            );
+
+
+          self.value = {
+            x: xPercent,
+            y: yPercent
+          };
+
+
+          /*
+           * =========================
+           * FIXED DRIVE MAPPING
+           * =========================
+           *
+           * Joystick UP:
+           *   driveValues 31 -> 0
+           *
+           * Center:
+           *   driveValues 31
+           *
+           * Joystick DOWN:
+           *   driveValues 31 -> 62
+           *
+           * Left/right:
+           *   turn only
+           */
+
+
+          let xVal;
+          let yVal;
+
+
+          /*
+           * If the joystick is primarily
+           * vertical, drive forward/backward.
+           */
+
+          if (
+            Math.abs(yPercent) >=
+            Math.abs(xPercent)
+          ) {
+
+            /* Straight */
+
+            xVal = 16;
+
+
+            /*
+             * UP = forward
+             *
+             * yPercent:
+             *   0 = center
+             *  -1 = full up
+             */
+
+            yVal =
+              31 +
+              (31 * yPercent);
+
+
+          } else {
+
+            /*
+             * Primarily horizontal:
+             * turn without driving.
+             */
+
+            yVal = 31;
+
+
+            /*
+             * xPercent:
+             *  -1 = left
+             *   0 = center
+             *  +1 = right
+             */
+
+            xVal =
+              16 +
+              (15 * xPercent);
+          }
+
+
+          /*
+           * Keep values inside valid ranges.
+           */
+
+          x =
+            Math.max(
+              1,
+              Math.min(
+                32,
+                Math.floor(xVal)
+              )
+            );
+
+
+          y =
+            Math.max(
+              0,
+              Math.min(
+                62,
+                Math.floor(yVal)
+              )
+            );
+
+
+          /*
+           * Send command.
+           */
+
+          throttle(
+            () => driveAndTurn()
+          );
+        }
+
+
+        function handleUp(event) {
+
+          if (!self.active) return;
+
+
+          if (
+            event.changedTouches &&
+            self.touchId !==
+            event.changedTouches[0].identifier
+          ) {
+            return;
+          }
+
+
+          /* Return joystick to center */
+
+          stick.style.transition = '.2s';
+
+          stick.style.transform =
+            'translate3d(0px,0px,0px)';
+
+
+          /* Reset */
+
+          self.value = {
+            x: 0,
+            y: 0
+          };
+
+          self.touchId = null;
+
+          self.active = false;
+
+
+          /* Stop R2-D2 */
+
+          stop();
+        }
+
+
+        stick.addEventListener(
+          'mousedown',
+          handleDown
+        );
+
+        stick.addEventListener(
+          'touchstart',
+          handleDown
+        );
+
+        document.addEventListener(
+          'mousemove',
+          handleMove,
+          {passive:false}
+        );
+
+        document.addEventListener(
+          'touchmove',
+          handleMove,
+          {passive:false}
+        );
+
+        document.addEventListener(
+          'mouseup',
+          handleUp
+        );
+
+        document.addEventListener(
+          'touchend',
+          handleUp
+        );
+      }
+    }
+
+
+    /*
+     * Send turn and drive.
+     */
+
+    function driveAndTurn() {
+
+      if (!characteristic) return;
+
+      if (x !== undefined) {
+        turn(x);
+      }
+
+      setTimeout(
+        () => {
+          if (y !== undefined) {
+            drive(y);
+          }
+        },
+        100
+      );
+    }
+
+  </script>
+</head>
+
+
+<body>
+
+
+<div id="controls">
+
+
+  <!-- =========================
+       LEFT SIDE
+       ========================= -->
+
+  <div id="left">
+
+    <button onclick="connect()">
+      connect
+    </button>
+
+
+    <button onclick="stop()">
+      stop
+    </button>
+
+
+    <p>
+
+      <div id="joystick">
+
+        <img
+          src="images/joystick-base.png"
+          height="256px"
+        />
+
+
+        <div
+          id="stick1"
+          style="
+            position:absolute;
+            left:64px;
+            top:64px;
+          "
+        >
+
+          <img
+            src="images/joystick-red.png"
+            height="128px"
+          />
+
+        </div>
+
+      </div>
+
+    </p>
+
+  </div>
+
+
+
+  <!-- =========================
+       RIGHT SIDE / SOUNDS
+       ========================= -->
+
+  <div id="right">
+
+    <p class="soundButtons">
+
+      sound controls
+
+
+      <div id="buttonsDiv">
+
+      </div>
+
+    </p>
+
+  </div>
+
+
+</div>
+
+
+
+<script>
+
+  /*
+   * =========================
+   * SOUND CONTROLS
+   * =========================
+   */
+
+  let sounds = {
+
+    "grump":
+      "1E011B42AA",
+
+    "scold":
+      "1E011A528B",
+
+    "chitter":
+      "1E011962E8",
+
+    "chattering":
+      "1E011872C9",
+
+    "i love you":
+      "1E01178326",
+
+    "bleep":
+      "1E01169307",
+
+    "beep":
+      "1E0115A364",
+
+    "whistle":
+      "1E0114B345",
+
+    "descending":
+      "1E0113C3A2",
+
+    "excited":
+      "1E0112D383",
+
+    "cheery":
+      "1E0111E3E0",
+
+    "sad":
+      "1E0110F3C1",
+
+    "scream!!":
+      "1E010F101F",
+
+    "startup":
+      "1E010E003E",
+
+    "surprise!!":
+      "1E010C207C",
+
+    "story":
+      "1E010A40BA",
+
+    "wow!":
+      "1E010860F8",
+
+    "thbt":
+      "1E01068136",
+
+    "worried":
+      "1E0104A174",
+
+    "dubious":
+      "1E0102C1B2",
+
+    "thinking":
+      "1E0100E1F0"
+  };
+
+
+  function makeSoundButtons() {
+
+    let soundsDiv =
+      document.getElementById(
+        'buttonsDiv'
+      );
+
+
+    for (
+      const [key, value]
+      of Object.entries(sounds)
+    ) {
+
+      soundsDiv.innerHTML +=
+        `<button onclick="play('${value}')">
+          ${key}
+        </button>`;
+    }
+  }
+
+
+  makeSoundButtons();
+
+
+
+  /*
+   * =========================
+   * TURN COMMANDS
+   * =========================
+   */
+
+  let turnCommand = null;
+
+  let driveComand = null;
+
+  let lastRan;
+
+  let lastFunc;
+
+
+  /*
+   * x = turning
+   * y = driving
+   *
+   * 16 = straight
+   * 31 = stop
+   */
+
+  let x = 16;
+
+  let y = 31;
+
+
+  let turnValues = [
+
+    "140201FC00AD", // left
+    "140201EA725A",
+    "140201E49394",
+    "140201DF14AC",
+    "140201D9746A",
+    "140201D1F562",
+    "140201CC36FE",
+    "140201C697B4",
+    "140201C0F772",
+    "140201B918CC",
+    "140201B4C961",
+    "140201AE7A1A",
+    "140201A7EB33",
+    "140201A2BB96",
+    "1402019C6C0B",
+
+    "14020196CD41", // straight
+
+    "14020190AD87",
+    "1402018A1EFC",
+    "14020184FF32",
+    "1402017EB167",
+    "14020178D1A1",
+    "1402017270EB",
+    "1402016C8314",
+    "14020166225E",
+    "140201604298",
+    "1402015AD581",
+    "14020154344F",
+    "1402014F9715",
+    "14020149F7D3",
+    "1402014246B8",
+    "1402013CD9E1",
+    "1402013548C8",
+
+    "140201002E3E" // right
+  ];
+
+
+
+  /*
+   * Create joystick
+   */
+
+  let joystick1 =
+    new JoystickController(
+      "stick1",
+      64,
+      8
+    );
+
+
+
+  /*
+   * =========================
+   * THROTTLE
+   * =========================
+   */
+
+  function throttle(
+    func,
+    limit = 150
+  ) {
+
+    const context = this;
+
+    const args = arguments;
+
+
+    if (!lastRan) {
+
+      func.apply(
+        context,
+        args
+      );
+
+      lastRan = Date.now();
+
+    } else {
+
+      clearTimeout(lastFunc);
+
+
+      lastFunc =
+        setTimeout(
+          function() {
+
+            if (
+              (Date.now() - lastRan)
+              >= limit
+            ) {
+
+              func.apply(
+                context,
+                args
+              );
+
+              lastRan =
+                Date.now();
+            }
+
+          },
+          Math.max(
+            0,
+            limit -
+            (Date.now() - lastRan)
+          )
+        );
+    }
+  }
+
+</script>
+
+
+</body>
+</html>
