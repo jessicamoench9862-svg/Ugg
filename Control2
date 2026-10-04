@@ -1,0 +1,755 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+
+<style>
+html, body {
+    margin: 0;
+    padding: 10px;
+    font-family: Arial, sans-serif;
+}
+
+button {
+    background-color: #4CAF50;
+    border: none;
+    color: white;
+    padding: 14px 20px;
+    margin: 5px;
+    font-size: 16px;
+    border-radius: 6px;
+}
+
+#controls {
+    width: 100%;
+}
+
+#left {
+    width: 50%;
+    float: left;
+}
+
+#right {
+    width: 50%;
+    float: right;
+}
+
+#joystick {
+    margin: 20px auto;
+    position: relative;
+    width: 256px;
+    height: 256px;
+}
+
+.testButtons {
+    text-align: center;
+    margin-top: 20px;
+}
+
+#status {
+    font-size: 18px;
+    font-weight: bold;
+    margin: 10px;
+}
+</style>
+
+<script>
+
+let characteristic = null;
+
+/* =========================
+   BLUETOOTH
+   ========================= */
+
+async function connect() {
+
+    try {
+
+        const device = await navigator.bluetooth.requestDevice({
+            filters: [
+                { name: "w32 ControlHub" }
+            ],
+            optionalServices: [
+                "d9d9e9e0-aa4e-4797-8151-cb41cedaf2ad"
+            ]
+        });
+
+        const server = await device.gatt.connect();
+
+        const service = await server.getPrimaryService(
+            "d9d9e9e0-aa4e-4797-8151-cb41cedaf2ad"
+        );
+
+        characteristic = await service.getCharacteristic(
+            "d9d9e9e1-aa4e-4797-8151-cb41cedaf2ad"
+        );
+
+        document.getElementById("status").innerText =
+            "Connected!";
+
+        await stop();
+
+    } catch (error) {
+
+        console.log(error);
+
+        document.getElementById("status").innerText =
+            "Connection failed";
+    }
+}
+
+
+/* Convert hex to bytes */
+
+function hexToBytes(hex) {
+
+    let bytes = [];
+
+    for (let i = 0; i < hex.length; i += 2) {
+        bytes.push(
+            parseInt(hex.substring(i, i + 2), 16)
+        );
+    }
+
+    return bytes;
+}
+
+
+/* Send command */
+
+async function writeToChar(value) {
+
+    if (!characteristic) {
+        console.log("Not connected");
+        return;
+    }
+
+    try {
+
+        const bytes = hexToBytes(value);
+
+        const data = new Uint8Array(bytes);
+
+        await characteristic.writeValue(data);
+
+        console.log("Sent:", value);
+
+    } catch (error) {
+
+        console.log("Bluetooth error:", error);
+
+    }
+}
+
+
+/* =========================
+   ORIGINAL LITTLEBITS COMMANDS
+   ========================= */
+
+/*
+   These are the actual commands from
+   the original littleBits R2-D2 controller.
+*/
+
+const FORWARD =
+    "140202FF659D";
+
+const STOP =
+    "140202897BCC";
+
+const REVERSE =
+    "140202070B8A";
+
+
+/* =========================
+   DIRECT MOTOR CONTROLS
+   ========================= */
+
+async function forward() {
+
+    console.log("FORWARD");
+
+    await writeToChar(FORWARD);
+}
+
+
+async function reverse() {
+
+    console.log("REVERSE");
+
+    await writeToChar(REVERSE);
+}
+
+
+async function stop() {
+
+    console.log("STOP");
+
+    await writeToChar(STOP);
+}
+
+
+/* =========================
+   TURN COMMANDS
+   ========================= */
+
+const turnValues = [
+
+    "140201FC00AD",
+    "140201EA725A",
+    "140201E49394",
+    "140201DF14AC",
+    "140201D9746A",
+    "140201D1F562",
+    "140201CC36FE",
+    "140201C697B4",
+    "140201C0F772",
+    "140201B918CC",
+    "140201B4C961",
+    "140201AE7A1A",
+    "140201A7EB33",
+    "140201A2BB96",
+    "1402019C6C0B",
+
+    /* straight */
+    "14020196CD41",
+
+    "14020190AD87",
+    "1402018A1EFC",
+    "14020184FF32",
+    "1402017EB167",
+    "14020178D1A1",
+    "1402017270EB",
+    "1402016C8314",
+    "14020166225E",
+    "140201604298",
+    "1402015AD581",
+    "14020154344F",
+    "1402014F9715",
+    "14020149F7D3",
+    "1402014246B8",
+    "1402013CD9E1",
+    "1402013548C8",
+
+    /* right */
+    "140201002E3E"
+];
+
+
+async function turn(index) {
+
+    if (index < 0) index = 0;
+
+    if (index >= turnValues.length) {
+        index = turnValues.length - 1;
+    }
+
+    await writeToChar(turnValues[index]);
+}
+
+
+/* =========================
+   JOYSTICK
+   ========================= */
+
+class JoystickController {
+
+    constructor(stickID, maxDistance, deadzone) {
+
+        this.id = stickID;
+
+        let stick =
+            document.getElementById(stickID);
+
+        this.dragStart = null;
+        this.touchId = null;
+        this.active = false;
+
+        let self = this;
+
+
+        function handleDown(event) {
+
+            self.active = true;
+
+            event.preventDefault();
+
+            if (event.changedTouches) {
+
+                self.dragStart = {
+                    x: event.changedTouches[0].clientX,
+                    y: event.changedTouches[0].clientY
+                };
+
+                self.touchId =
+                    event.changedTouches[0].identifier;
+
+            } else {
+
+                self.dragStart = {
+                    x: event.clientX,
+                    y: event.clientY
+                };
+            }
+        }
+
+
+        function handleMove(event) {
+
+            if (!self.active) return;
+
+            if (!characteristic) return;
+
+
+            let clientX;
+            let clientY;
+
+
+            if (event.changedTouches) {
+
+                let found = false;
+
+                for (
+                    let i = 0;
+                    i < event.changedTouches.length;
+                    i++
+                ) {
+
+                    let touch =
+                        event.changedTouches[i];
+
+                    if (
+                        touch.identifier ===
+                        self.touchId
+                    ) {
+
+                        clientX = touch.clientX;
+                        clientY = touch.clientY;
+
+                        found = true;
+
+                        break;
+                    }
+                }
+
+                if (!found) return;
+
+            } else {
+
+                clientX = event.clientX;
+                clientY = event.clientY;
+            }
+
+
+            const xDiff =
+                clientX - self.dragStart.x;
+
+            const yDiff =
+                clientY - self.dragStart.y;
+
+
+            const distance =
+                Math.min(
+                    maxDistance,
+                    Math.hypot(xDiff, yDiff)
+                );
+
+
+            const angle =
+                Math.atan2(yDiff, xDiff);
+
+
+            const x =
+                xDiff / maxDistance;
+
+            const y =
+                yDiff / maxDistance;
+
+
+            /*
+              Move the red joystick graphic.
+            */
+
+            const xPosition =
+                distance * Math.cos(angle);
+
+            const yPosition =
+                distance * Math.sin(angle);
+
+            stick.style.transform =
+                `translate3d(${xPosition}px, ${yPosition}px, 0px)`;
+
+
+            /*
+              DEADZONE
+            */
+
+            if (distance < deadzone) {
+
+                stop();
+
+                return;
+            }
+
+
+            /*
+              Determine direction.
+              
+              Screen:
+              
+              UP    = forward
+              DOWN  = reverse
+              LEFT  = turn left
+              RIGHT = turn right
+            */
+
+
+            const horizontal =
+                Math.abs(xDiff);
+
+            const vertical =
+                Math.abs(yDiff);
+
+
+            /*
+              Mostly vertical movement
+            */
+
+            if (vertical > horizontal) {
+
+                if (yDiff < 0) {
+
+                    /*
+                      UP
+                      ----
+                      FORWARD
+                    */
+
+                    forward();
+
+                } else {
+
+                    /*
+                      DOWN
+                      ----
+                      REVERSE
+                    */
+
+                    reverse();
+                }
+
+
+                /*
+                  Also straighten wheels
+                  while driving straight.
+                */
+
+                turn(16);
+
+            }
+
+
+            /*
+              Mostly horizontal movement
+            */
+
+            else {
+
+                /*
+                  Stop forward/reverse while
+                  turning so the turn command
+                  can be tested independently.
+                */
+
+                stop();
+
+
+                if (xDiff < 0) {
+
+                    /*
+                      LEFT
+                    */
+
+                    turn(0);
+
+                } else {
+
+                    /*
+                      RIGHT
+                    */
+
+                    turn(32);
+                }
+            }
+        }
+
+
+        function handleUp(event) {
+
+            if (!self.active) return;
+
+
+            if (
+                event.changedTouches &&
+                self.touchId !==
+                event.changedTouches[0].identifier
+            ) {
+                return;
+            }
+
+
+            stick.style.transition = ".2s";
+
+            stick.style.transform =
+                "translate3d(0px, 0px, 0px)";
+
+
+            self.active = false;
+
+            self.touchId = null;
+
+
+            stop();
+        }
+
+
+        stick.addEventListener(
+            "mousedown",
+            handleDown
+        );
+
+        stick.addEventListener(
+            "touchstart",
+            handleDown
+        );
+
+        document.addEventListener(
+            "mousemove",
+            handleMove
+        );
+
+        document.addEventListener(
+            "touchmove",
+            handleMove
+        );
+
+        document.addEventListener(
+            "mouseup",
+            handleUp
+        );
+
+        document.addEventListener(
+            "touchend",
+            handleUp
+        );
+    }
+}
+
+
+/* =========================
+   SOUNDS
+   ========================= */
+
+const sounds = {
+
+    "grump":
+    "1E011B42AA",
+
+    "scold":
+    "1E011A528B",
+
+    "chitter":
+    "1E011962E8",
+
+    "chattering":
+    "1E011872C9",
+
+    "i love you":
+    "1E01178326",
+
+    "bleep":
+    "1E01169307",
+
+    "beep":
+    "1E0115A364",
+
+    "whistle":
+    "1E0114B345",
+
+    "descending":
+    "1E0113C3A2",
+
+    "excited":
+    "1E0112D383",
+
+    "cheery":
+    "1E0111E3E0",
+
+    "sad":
+    "1E0110F3C1",
+
+    "scream!!":
+    "1E010F101F",
+
+    "startup":
+    "1E010E003E",
+
+    "surprise!!":
+    "1E010C207C",
+
+    "story":
+    "1E010A40BA",
+
+    "wow!":
+    "1E010860F8",
+
+    "thbt":
+    "1E01068136",
+
+    "worried":
+    "1E0104A174",
+
+    "thinking":
+    "1E0100E1F0"
+};
+
+
+async function play(sound) {
+
+    await writeToChar(sound);
+}
+
+
+function makeSoundButtons() {
+
+    const div =
+        document.getElementById("buttonsDiv");
+
+    for (
+        const [name, command]
+        of Object.entries(sounds)
+    ) {
+
+        const button =
+            document.createElement("button");
+
+        button.innerText = name;
+
+        button.onclick =
+            () => play(command);
+
+        div.appendChild(button);
+    }
+}
+
+
+/* =========================
+   STARTUP
+   ========================= */
+
+window.onload = function() {
+
+    makeSoundButtons();
+
+    new JoystickController(
+        "stick1",
+        64,
+        8
+    );
+
+};
+
+</script>
+
+</head>
+
+
+<body>
+
+<div id="status">
+    Not connected
+</div>
+
+
+<button onclick="connect()">
+    CONNECT
+</button>
+
+<button onclick="stop()">
+    STOP
+</button>
+
+
+<!--
+=========================================
+MOTOR TEST BUTTONS
+=========================================
+-->
+
+<div class="testButtons">
+
+    <h3>Motor Test</h3>
+
+    <button onclick="forward()">
+        FORWARD
+    </button>
+
+    <button onclick="reverse()">
+        REVERSE
+    </button>
+
+    <button onclick="stop()">
+        STOP
+    </button>
+
+</div>
+
+
+<div id="controls">
+
+    <div id="left">
+
+        <h3>Joystick</h3>
+
+        <div id="joystick">
+
+            <img
+                src="images/joystick-base.png"
+                height="256"
+            >
+
+            <div
+                id="stick1"
+                style="
+                    position:absolute;
+                    left:64px;
+                    top:64px;
+                "
+            >
+
+                <img
+                    src="images/joystick-red.png"
+                    height="128"
+                >
+
+            </div>
+
+        </div>
+
+    </div>
+
+
+    <div id="right">
+
+        <h3>Sounds</h3>
+
+        <div id="buttonsDiv"></div>
+
+    </div>
+
+</div>
+
+</body>
+</html>
